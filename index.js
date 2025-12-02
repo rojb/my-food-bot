@@ -376,7 +376,7 @@ async function handleConfirmOrder(chatId) {
     try {
         const orderPayload = {
             customerId: session.customerId,
-            customerAddressId: session.deliveryAddressId,
+            addressId: session.deliveryAddressId,
             deliveryPrice: session.currentOrder.deliveryPrice,
             products: cart.map((item) => ({
                 productId: item.id,
@@ -416,7 +416,7 @@ async function handleViewOrders(chatId) {
     }
 
     try {
-        const response = await backendRequest('GET', '/orders', null, session.accessToken);
+        const response = await backendRequest('GET', `/orders/customer/${session.customerId}`, null, session.accessToken);
 
         if (response.status !== 200 || !response.data || response.data.length === 0) {
             await sendMessage(chatId, '❌ No hay pedidos');
