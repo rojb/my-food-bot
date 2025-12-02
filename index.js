@@ -199,8 +199,9 @@ async function handleLocation(chatId, lat, lng) {
             },
             session.accessToken
         );
+        console.log(addressResponse)
 
-        if (addressResponse.status !== 200 || addressResponse.status !== 201) {
+        if (addressResponse.status !== 200 && addressResponse.status !== 201) {
             await sendMessage(chatId, '❌ Error al guardar dirección');
             return;
         }
