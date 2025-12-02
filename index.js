@@ -1,6 +1,5 @@
 const https = require('https');
 const http = require('http');
-const crypto = require('crypto');
 
 // ==================== CONFIG ====================
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'tu_token';
@@ -123,8 +122,7 @@ function calculateDeliveryPrice(distanceKm, baseFare = 5.0, maxBaseFareRadius = 
 }
 
 function calculateDistance(lat1, lon1, lat2, lon2) {
-    // Haversine formula
-    const R = 6371; // Earth radius in km
+    const R = 6371;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
     const dLon = ((lon2 - lon1) * Math.PI) / 180;
     const a =
@@ -139,39 +137,105 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 // ==================== HANDLERS ====================
 async function handleStart(chatId, firstName) {
-    userSessions.set(chatId, { state: 'main_menu', firstName });
-    cartItems.set(chatId, []);
+    try {
+        // Autenticar/obtener customer desde backend
+        const authResponse = await backendRequest('POST', '/auth/telegram-login', {
+            telegramId: chatId.toString(),
+            name: firstName,
+            lastName: 'User',
+        });
 
-    const text = `¡Hola ${firstName}! 👋\n\nBienvenido a <b>MyFood</b>. Aquí puedes:\n\n✅ Ver productos\n📦 Hacer pedidos\n🚗 Rastrear tu entrega`;
+        if (authResponse.status !== 200) {
+            await sendMessage(chatId, '❌ Error de autenticación');
+            return;
+        }
 
-    const buttons = [
-        [{ text: '📍 Enviar ubicación', callback_data: 'send_location' }],
-        [{ text: '🛍️ Ver productos', callback_data: 'view_products' }],
-        [{ text: '🛒 Mi carrito', callback_data: 'view_cart' }],
-        [{ text: '📦 Mis pedidos', callback_data: 'view_orders' }],
-    ];
+        const accessToken = authResponse.data.access_token;
+        const customer = authResponse.data.customer;
 
-    await sendInlineKeyboard(chatId, text, buttons);
+        // Guardar sesión con información del customer
+        userSessions.set(chatId, {
+            state: 'main_menu',
+            firstName,
+            customerId: customer.id,
+            accessToken,
+        });
+        cartItems.set(chatId, []);
+
+        const text = `¡Hola ${firstName}! 👋\n\nBienvenido a <b>MyFood</b>. Aquí puedes:\n\n✅ Ver productos\n📦 Hacer pedidos\n🚗 Rastrear tu entrega`;
+
+        const buttons = [
+            [{ text: '📍 Enviar ubicación', callback_data: 'send_location' }],
+            [{ text: '🛍️ Ver productos', callback_data: 'view_products' }],
+            [{ text: '🛒 Mi carrito', callback_data: 'view_cart' }],
+            [{ text: '📦 Mis pedidos', callback_data: 'view_orders' }],
+        ];
+
+        await sendInlineKeyboard(chatId, text, buttons);
+    } catch (error) {
+        console.error('Error en handleStart:', error);
+        await sendMessage(chatId, '❌ Error al iniciar sesión');
+    }
 }
 
 async function handleLocation(chatId, lat, lng) {
     const session = userSessions.get(chatId);
-    if (!session) {
+    if (!session || !session.accessToken) {
         await sendMessage(chatId, '❌ Sesión expirada. Usa /start');
         return;
     }
 
-    session.deliveryLocation = { lat, lng };
-    userSessions.set(chatId, session);
+    try {
+        // Crear dirección en backend
+        const addressResponse = await backendRequest(
+            'POST',
+            '/addresses',
+            {
+                name: 'Dirección',
+                description: 'Ubicación de entrega',
+                coordinateX: lat,
+                coordinateY: lng,
+            },
+            session.accessToken
+        );
 
-    const text = `✅ Ubicación guardada:\n📍 <code>${lat.toFixed(6)}, ${lng.toFixed(6)}</code>\n\n¿Qué deseas hacer?`;
+        if (addressResponse.status !== 201) {
+            await sendMessage(chatId, '❌ Error al guardar dirección');
+            return;
+        }
 
-    const buttons = [
-        [{ text: '🛍️ Ver productos', callback_data: 'view_products' }],
-        [{ text: '📍 Cambiar ubicación', callback_data: 'send_location' }],
-    ];
+        const addressId = addressResponse.data.id;
 
-    await sendInlineKeyboard(chatId, text, buttons);
+        // Asociar dirección al customer
+        const associateResponse = await backendRequest(
+            'POST',
+            `/customers/${session.customerId}/addresses/${addressId}`,
+            {},
+            session.accessToken
+        );
+
+        if (associateResponse.status !== 201) {
+            await sendMessage(chatId, '❌ Error al asociar dirección');
+            return;
+        }
+
+        // Guardar en sesión
+        session.deliveryLocation = { lat, lng };
+        session.deliveryAddressId = addressId;
+        userSessions.set(chatId, session);
+
+        const text = `✅ Ubicación guardada:\n📍 <code>${lat.toFixed(6)}, ${lng.toFixed(6)}</code>\n\n¿Qué deseas hacer?`;
+
+        const buttons = [
+            [{ text: '🛍️ Ver productos', callback_data: 'view_products' }],
+            [{ text: '📍 Cambiar ubicación', callback_data: 'send_location' }],
+        ];
+
+        await sendInlineKeyboard(chatId, text, buttons);
+    } catch (error) {
+        console.error('Error en handleLocation:', error);
+        await sendMessage(chatId, '❌ Error al procesar ubicación');
+    }
 }
 
 async function handleViewProducts(chatId) {
@@ -261,7 +325,6 @@ async function handleViewCart(chatId) {
         text += `${index + 1}. ${item.name} x${item.quantity} = $${itemTotal.toFixed(2)}\n`;
     });
 
-    // Calculate delivery price (need restaurant location from env or config)
     const restaurantLat = parseFloat(process.env.RESTAURANT_LAT || '-16.389385');
     const restaurantLng = parseFloat(process.env.RESTAURANT_LNG || '-68.119294');
 
@@ -273,7 +336,6 @@ async function handleViewCart(chatId) {
     );
 
     const deliveryPrice = calculateDeliveryPrice(distance);
-
     const total = subtotal + deliveryPrice;
 
     text += `\n<b>Subtotal:</b> $${subtotal.toFixed(2)}`;
@@ -302,58 +364,14 @@ async function handleConfirmOrder(chatId) {
     const session = userSessions.get(chatId);
     const cart = cartItems.get(chatId) || [];
 
-    if (!session || !session.deliveryLocation || cart.length === 0) {
-        await sendMessage(chatId, '❌ Carrito incompleto o ubicación no establecida');
+    if (!session || !session.deliveryAddressId || cart.length === 0) {
+        await sendMessage(chatId, '❌ Carrito incompleto o dirección no establecida');
         return;
     }
 
     try {
-        // First, login or authenticate the customer
-        const loginResponse = await backendRequest('POST', '/auth/telegram-login', {
-            telegramId: chatId.toString(),
-            name: session.firstName,
-            lastName: 'User',
-        });
-
-        if (loginResponse.status !== 200) {
-            await sendMessage(chatId, '❌ Error de autenticación');
-            return;
-        }
-
-        const accessToken = loginResponse.data.access_token;
-
-        // Create or get customer address
-        const addressResponse = await backendRequest(
-            'POST',
-            '/addresses',
-            {
-                name: 'Entrega',
-                description: 'Ubicación de entrega',
-                coordinateX: session.deliveryLocation.lat,
-                coordinateY: session.deliveryLocation.lng,
-            },
-            accessToken
-        );
-
-        if (addressResponse.status !== 201) {
-            await sendMessage(chatId, '❌ Error al guardar dirección');
-            return;
-        }
-
-        // Add address to customer
-        const customerId = loginResponse.data.customer.id;
-        const addressId = addressResponse.data.id;
-
-        await backendRequest(
-            'POST',
-            `/customers/${customerId}/addresses/${addressId}`,
-            {},
-            accessToken
-        );
-
-        // Create the order
         const orderPayload = {
-            customerAddressId: addressId,
+            customerAddressId: session.deliveryAddressId,
             deliveryPrice: session.currentOrder.deliveryPrice,
             products: cart.map((item) => ({
                 productId: item.id,
@@ -361,7 +379,7 @@ async function handleConfirmOrder(chatId) {
             })),
         };
 
-        const orderResponse = await backendRequest('POST', '/orders', orderPayload, accessToken);
+        const orderResponse = await backendRequest('POST', '/orders', orderPayload, session.accessToken);
 
         if (orderResponse.status !== 201) {
             await sendMessage(chatId, '❌ Error al crear pedido');
@@ -372,7 +390,6 @@ async function handleConfirmOrder(chatId) {
         const text = `✅ <b>¡Pedido confirmado!</b>\n\n📦 ID del pedido: <code>${orderId}</code>\n💰 Total: $${session.currentOrder.total.toFixed(2)}\n\nRastreando tu entrega...`;
 
         session.lastOrderId = orderId;
-        session.lastOrderToken = accessToken;
         userSessions.set(chatId, session);
         cartItems.set(chatId, []);
 
@@ -388,18 +405,13 @@ async function handleConfirmOrder(chatId) {
 async function handleViewOrders(chatId) {
     const session = userSessions.get(chatId);
 
-    if (!session || !session.lastOrderToken) {
-        await sendMessage(chatId, '❌ No tienes pedidos. Crea uno primero');
+    if (!session || !session.accessToken) {
+        await sendMessage(chatId, '❌ No tienes sesión activa');
         return;
     }
 
     try {
-        const response = await backendRequest(
-            'GET',
-            '/orders',
-            null,
-            session.lastOrderToken
-        );
+        const response = await backendRequest('GET', '/orders', null, session.accessToken);
 
         if (response.status !== 200 || !response.data || response.data.length === 0) {
             await sendMessage(chatId, '❌ No hay pedidos');
@@ -435,12 +447,62 @@ async function handleViewOrders(chatId) {
 async function handleClearCart(chatId) {
     cartItems.set(chatId, []);
     await sendMessage(chatId, '🗑️ Carrito vaciado');
-    await handleStart(chatId, userSessions.get(chatId)?.firstName || 'Usuario');
+    const session = userSessions.get(chatId);
+    await handleStart(chatId, session?.firstName || 'Usuario');
 }
 
 async function handleBackToMenu(chatId) {
     const session = userSessions.get(chatId);
     await handleStart(chatId, session?.firstName || 'Usuario');
+}
+
+async function handleTrackOrder(chatId, orderId) {
+    const session = userSessions.get(chatId);
+
+    if (!session || !session.accessToken) {
+        await sendMessage(chatId, '❌ Sesión expirada');
+        return;
+    }
+
+    try {
+        const orderResponse = await backendRequest(
+            'GET',
+            `/orders/${orderId}`,
+            null,
+            session.accessToken
+        );
+
+        if (orderResponse.status !== 200) {
+            await sendMessage(chatId, '❌ Pedido no encontrado');
+            return;
+        }
+
+        const order = orderResponse.data;
+        let text = `<b>📦 Pedido #${order.id}</b>\n\n`;
+        text += `Estado: <b>${order.orderStatus?.name || 'Procesando'}</b>\n`;
+        text += `Total: $${order.total}\n`;
+
+        if (order.deliveries && order.deliveries.length > 0) {
+            const delivery = order.deliveries[0];
+            if (delivery.driver) {
+                text += `\n<b>🚗 Conductor:</b>\n`;
+                text += `Nombre: ${delivery.driver.name} ${delivery.driver.lastName}\n`;
+                text += `Estado: ${delivery.driver.isAvailable ? '✅ Disponible' : '❌ No disponible'}\n`;
+            }
+        }
+
+        text += `\n📍 <b>Tu ubicación:</b> ${order.customerAddress?.coordinateX?.toFixed(6)}, ${order.customerAddress?.coordinateY?.toFixed(6)}`;
+
+        const buttons = [
+            [{ text: '🔄 Actualizar', callback_data: `track_order_${orderId}` }],
+            [{ text: '📦 Ver pedidos', callback_data: 'view_orders' }],
+        ];
+
+        await sendInlineKeyboard(chatId, text, buttons);
+    } catch (error) {
+        console.error('Error tracking order:', error);
+        await sendMessage(chatId, '❌ Error al rastrear pedido');
+    }
 }
 
 // ==================== WEBHOOK HANDLER ====================
@@ -449,7 +511,6 @@ async function handleUpdate(update) {
 
     if (!chatId) return;
 
-    // Handle text messages
     if (update.message) {
         const message = update.message;
 
@@ -458,13 +519,11 @@ async function handleUpdate(update) {
         }
     }
 
-    // Handle location
     if (update.message?.location) {
         const { latitude, longitude } = update.message.location;
         await handleLocation(chatId, latitude, longitude);
     }
 
-    // Handle callback queries
     if (update.callback_query) {
         const data = update.callback_query.data;
 
@@ -490,58 +549,9 @@ async function handleUpdate(update) {
             await handleTrackOrder(chatId, orderId);
         }
 
-        // Acknowledge callback query
         await makeRequest('POST', '/answerCallbackQuery', {
             callback_query_id: update.callback_query.id,
         });
-    }
-}
-
-async function handleTrackOrder(chatId, orderId) {
-    const session = userSessions.get(chatId);
-
-    if (!session || !session.lastOrderToken) {
-        await sendMessage(chatId, '❌ Sesión expirada');
-        return;
-    }
-
-    try {
-        const orderResponse = await backendRequest(
-            'GET',
-            `/orders/${orderId}`,
-            null,
-            session.lastOrderToken
-        );
-
-        if (orderResponse.status !== 200) {
-            await sendMessage(chatId, '❌ Pedido no encontrado');
-            return;
-        }
-
-        const order = orderResponse.data;
-        let text = `<b>📦 Pedido #${order.id}</b>\n\n`;
-        text += `Estado: <b>${order.orderStatus?.name || 'Procesando'}</b>\n`;
-        text += `Total: $${order.total}\n`;
-
-        if (order.deliveries && order.deliveries.length > 0) {
-            const delivery = order.deliveries[0];
-            if (delivery.driver) {
-                text += `\n<b>🚗 Conductor:</b>\n`;
-                text += `Nombre: ${delivery.driver.name} ${delivery.driver.lastName}\n`;
-                text += `Estado: ${delivery.driver.isAvailable ? '✅ Disponible' : '❌ No disponible'}\n`;
-                text += `\n📍 <b>Tu ubicación:</b> ${order.customerAddress?.coordinateX?.toFixed(6)}, ${order.customerAddress?.coordinateY?.toFixed(6)}`;
-            }
-        }
-
-        const buttons = [
-            [{ text: '🔄 Actualizar', callback_data: `track_order_${orderId}` }],
-            [{ text: '📦 Ver pedidos', callback_data: 'view_orders' }],
-        ];
-
-        await sendInlineKeyboard(chatId, text, buttons);
-    } catch (error) {
-        console.error('Error tracking order:', error);
-        await sendMessage(chatId, '❌ Error al rastrear pedido');
     }
 }
 
@@ -580,7 +590,6 @@ server.listen(port, () => {
     console.log(`Bot server running on port ${port}`);
     console.log(`Webhook URL: ${WEBHOOK_URL}`);
 
-    // Set webhook
     makeRequest('POST', '/setWebhook', {
         url: WEBHOOK_URL,
         allowed_updates: ['message', 'callback_query'],
