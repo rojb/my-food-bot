@@ -375,6 +375,7 @@ async function handleConfirmOrder(chatId) {
 
     try {
         const orderPayload = {
+            customerId: session.customerId,
             customerAddressId: session.deliveryAddressId,
             deliveryPrice: session.currentOrder.deliveryPrice,
             products: cart.map((item) => ({
