@@ -496,7 +496,7 @@ async function handleTrackOrder(chatId, orderId) {
             }
         }
 console.log('Order ',order)
-        text += `\n📍 <b>Tu ubicación:</b> ${order.address?.coordinateX?.toFixed(6)}, ${order.address?.coordinateY?.toFixed(6)}`;
+        text += `\n📍 <b>Tu ubicación:</b> ${order.address.coordinateX?.toFixed(6)}, ${order.address.coordinateY?.toFixed(6)}`;
 
         const buttons = [
             [{ text: '🔄 Actualizar', callback_data: `track_order_${orderId}` }],
