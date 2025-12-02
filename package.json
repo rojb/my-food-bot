@@ -1,0 +1,18 @@
+{
+  "name": "my-food-bot",
+  "version": "1.0.0",
+  "description": "My food's telegram bot",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon index.js",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "nodemon": "^3.1.11"
+  }
+}
