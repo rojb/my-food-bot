@@ -145,7 +145,7 @@ async function handleStart(chatId, firstName) {
             lastName: 'User',
         });
         console.log(authResponse)
-        if (authResponse.status !== 200) {
+        if (authResponse.status !== 200 || authResponse.status !== 201) {
             await sendMessage(chatId, '❌ Error de autenticación');
             return;
         }
@@ -199,7 +199,7 @@ async function handleLocation(chatId, lat, lng) {
             session.accessToken
         );
 
-        if (addressResponse.status !== 201) {
+        if (addressResponse.status !== 200 || addressResponse.status !== 201) {
             await sendMessage(chatId, '❌ Error al guardar dirección');
             return;
         }
