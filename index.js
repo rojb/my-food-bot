@@ -495,8 +495,8 @@ async function handleTrackOrder(chatId, orderId) {
                 text += `Estado: ${delivery.driver.isAvailable ? '✅ Disponible' : '❌ No disponible'}\n`;
             }
         }
-
-        text += `\n📍 <b>Tu ubicación:</b> ${order.customerAddress?.coordinateX?.toFixed(6)}, ${order.customerAddress?.coordinateY?.toFixed(6)}`;
+console.log('Order ',order)
+        text += `\n📍 <b>Tu ubicación:</b> ${order.address?.coordinateX?.toFixed(6)}, ${order.address?.coordinateY?.toFixed(6)}`;
 
         const buttons = [
             [{ text: '🔄 Actualizar', callback_data: `track_order_${orderId}` }],
