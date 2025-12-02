@@ -145,10 +145,11 @@ async function handleStart(chatId, firstName) {
             lastName: 'User',
         });
         console.log(authResponse)
-        if (authResponse.status !== 200 || authResponse.status !== 201) {
+        if (authResponse.status !== 200 && authResponse.status !== 201) {
             await sendMessage(chatId, '❌ Error de autenticación');
             return;
         }
+
 
         const accessToken = authResponse.data.access_token;
         const customer = authResponse.data.customer;
