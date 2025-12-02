@@ -60,6 +60,8 @@ function backendRequest(method, path, data = null, token = null) {
             options.headers['Authorization'] = `Bearer ${token}`;
         }
 
+        console.log('options header',options)
+
         const req = protocol.request(options, (res) => {
             let body = '';
             res.on('data', (chunk) => (body += chunk));
@@ -144,7 +146,7 @@ async function handleStart(chatId, firstName) {
             name: firstName,
             lastName: 'User',
         });
-        console.log(authResponse)
+        console.log("auth ",authResponse)
         if (authResponse.status !== 200 && authResponse.status !== 201) {
             await sendMessage(chatId, '❌ Error de autenticación');
             return;
@@ -382,7 +384,7 @@ async function handleConfirmOrder(chatId) {
         };
 
         const orderResponse = await backendRequest('POST', '/orders', orderPayload, session.accessToken);
-
+        console.log(orderResponse)
         if (orderResponse.status !== 201) {
             await sendMessage(chatId, '❌ Error al crear pedido');
             return;
