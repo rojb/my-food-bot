@@ -144,7 +144,7 @@ async function handleStart(chatId, firstName) {
             name: firstName,
             lastName: 'User',
         });
-
+        console.log(authResponse)
         if (authResponse.status !== 200) {
             await sendMessage(chatId, '❌ Error de autenticación');
             return;
